@@ -1,0 +1,36 @@
+h1 {
+  font-family: 'Whitney';
+  font-weight: bold;
+}
+
+p {
+  font-family: 'Whitney';
+  font-weight: normal;
+}
+
+#container {
+  max-width: 900px;
+  padding-top: 50px;
+  padding-left: 100px;
+}
+
+#log {
+  min-width: 700px;
+  height: 500px;
+  overflow: auto;
+  padding-top: 10px;
+  padding-bottom: 20px;
+  padding-left: 20px;
+  border: 2px solid black;
+  border-radius: 7px;
+  margin-top: 10px;
+  margin-bottom: 10px;
+  max-width: 640px;
+}
+
+
+#message {
+  width: 700px;
+  min-height: 25px;
+  margin-bottom: 10px;
+}
