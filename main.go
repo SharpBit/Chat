@@ -40,13 +40,12 @@ func ws(w http.ResponseWriter, r *http.Request) {
 		log.Fatal(err)
 	}
 	conn.SetReadLimit(2000)
-	defer conn.Close()
 
 	conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
 	conn.SetCloseHandler(func(code int, text string) error {
 		return conn.WriteControl(websocket.CloseMessage,
-			websocket.FormatCloseMessage(websocket.CloseNormalClosure, "SOCKET TIMEOUT"),
-			time.Now().Add(5*time.Second))
+			websocket.FormatCloseMessage(websocket.CloseGoingAway, "SOCKET TIMEOUT"),
+			time.Now().Add(1000*time.Millisecond))
 	})
 
 	// receive message
@@ -55,9 +54,10 @@ func ws(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		conn.WriteControl(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "INVALID FORMAT"),
-			time.Now().Add(5*time.Second))
+			time.Now().Add(1000*time.Millisecond))
 		log.Fatal(err)
 	}
+	defer conn.Close()
 
 	fmt.Println(msg.Action)
 	if msg.Action == "HEARTBEAT" {
@@ -70,7 +70,7 @@ func ws(w http.ResponseWriter, r *http.Request) {
 		if len(msg.Data.Content) > 2000 {
 			conn.WriteControl(websocket.CloseMessage,
 				websocket.FormatCloseMessage(websocket.CloseMessageTooBig, "MESSAGE TOO LONG"),
-				time.Now().Add(5*time.Second))
+				time.Now().Add(1000*time.Millisecond))
 		}
 
 		err = conn.WriteJSON(msg)
@@ -80,7 +80,7 @@ func ws(w http.ResponseWriter, r *http.Request) {
 	} else {
 		conn.WriteControl(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseInvalidFramePayloadData, "INVALID ACTION"),
-			time.Now().Add(5*time.Second))
+			time.Now().Add(1000*time.Millisecond))
 	}
 }
 
