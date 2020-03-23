@@ -46,7 +46,6 @@ func ws(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer conn.Close()
 	clients[conn] = true
 
 	conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
