@@ -45,9 +45,8 @@ func ws(w http.ResponseWriter, r *http.Request) {
 
 	conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
 	conn.SetCloseHandler(func(code int, text string) error {
-		return conn.WriteControl(websocket.CloseMessage,
-			websocket.FormatCloseMessage(websocket.CloseGoingAway, "SOCKET TIMEOUT"),
-			time.Now().Add(1000*time.Millisecond))
+		delete(clients, conn)
+		return nil
 	})
 
 	for {
@@ -58,8 +57,7 @@ func ws(w http.ResponseWriter, r *http.Request) {
 			conn.WriteControl(websocket.CloseMessage,
 				websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "INVALID FORMAT"),
 				time.Now().Add(1000*time.Millisecond))
-			delete(clients, conn)
-			log.Fatal(err)
+			conn.Close()
 			break
 		}
 
@@ -83,7 +81,6 @@ func handleMessages() {
 						websocket.FormatCloseMessage(websocket.CloseMessageTooBig, "MESSAGE TOO LONG"),
 						time.Now().Add(1000*time.Millisecond))
 					client.Close()
-					delete(clients, client)
 					break
 				}
 			} else {
@@ -91,7 +88,6 @@ func handleMessages() {
 					websocket.FormatCloseMessage(websocket.CloseInvalidFramePayloadData, "INVALID ACTION"),
 					time.Now().Add(1000*time.Millisecond))
 				client.Close()
-				delete(clients, client)
 				break
 			}
 
@@ -99,7 +95,6 @@ func handleMessages() {
 			err := client.WriteJSON(msg)
 			if err != nil {
 				client.Close()
-				delete(clients, client)
 				log.Fatal(err)
 			}
 		}
@@ -107,6 +102,8 @@ func handleMessages() {
 }
 
 func main() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
 	// Handle static dirs
 	static := http.FileServer(http.Dir("./static"))
 	http.Handle("/static/", http.StripPrefix("/static/", static))
