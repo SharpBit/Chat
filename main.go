@@ -11,7 +11,7 @@ import (
 )
 
 var clients = make(map[*websocket.Conn]bool) // connected clients
-var broadcast = make(chan *Message)
+var broadcast = make(chan *Broadcast)
 var upgrader = websocket.Upgrader{}
 
 // Message received by or sent to server
@@ -24,6 +24,12 @@ type Message struct {
 type MessageData struct {
 	Content string `json:"content"`
 	Author  string `json:"author"`
+}
+
+// Broadcast keeps track of which client the message is from
+type Broadcast struct {
+	Client *websocket.Conn
+	Msg    *Message
 }
 
 func index(w http.ResponseWriter, r *http.Request) {
@@ -49,33 +55,48 @@ func ws(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 
+	go handleMessages(conn)
+}
+
+func handleMessages(client *websocket.Conn) {
 	for {
 		// receive message
 		msg := &Message{}
-		err = conn.ReadJSON(msg)
+		err := client.ReadJSON(msg)
 		if err != nil {
-			conn.WriteControl(websocket.CloseMessage,
+			client.WriteControl(websocket.CloseMessage,
 				websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "INVALID FORMAT"),
 				time.Now().Add(1000*time.Millisecond))
-			conn.Close()
+			client.Close()
 			break
 		}
 
 		// Add the msg to the broadcast channel
-		broadcast <- msg
+		broadcast <- &Broadcast{Client: client, Msg: msg}
 	}
 }
 
-func handleMessages() {
+func replyMessages() {
 	for {
 		// Grab the next message from the broadcast channel
-		msg := <-broadcast
-		// Send it out to every client that is currently connected
+		bc := <-broadcast
+		msg := bc.Msg
+		fmt.Println(msg.Action)
+
+		if msg.Action == "HEARTBEAT" {
+			msg.Action = "HEARTBEAT_ACK"
+			// Don't want every client to receive HEARTBEAT_ACK, only the one that sent it
+			err := bc.Client.WriteJSON(msg)
+			if err != nil {
+				bc.Client.Close()
+				log.Fatal(err)
+			}
+			continue
+		}
+
+		// Send msg out to every client that is currently connected
 		for client := range clients {
-			fmt.Println(msg.Action)
-			if msg.Action == "HEARTBEAT" {
-				msg.Action = "HEARTBEAT_ACK"
-			} else if msg.Action == "MESSAGE_CREATE" {
+			if msg.Action == "MESSAGE_CREATE" {
 				if len(msg.Data.Content) > 2000 {
 					client.WriteControl(websocket.CloseMessage,
 						websocket.FormatCloseMessage(websocket.CloseMessageTooBig, "MESSAGE TOO LONG"),
@@ -113,7 +134,7 @@ func main() {
 	// Handle Views
 	http.HandleFunc("/", index)
 	http.HandleFunc("/ws", ws)
-	go handleMessages()
+	go replyMessages()
 
 	fmt.Println("http server started on :8000")
 	log.Fatal(http.ListenAndServe(":8080", nil))
