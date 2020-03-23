@@ -8,9 +8,11 @@ $("#message").on("keydown", (event) => {
 });
 
 $("#send").on("click", (event) => {
+    const author = $("#name").val()
     const msg = $("#message").val();
     if (!msg) return
     if (msg.length > 2000) return alert("Message must be less than 2000 characters.");
+    if (author.length > 32) return alert("Username must be less than 32 characters.")
     try {
         try {
             ws.send(JSON.stringify({
