@@ -10,7 +10,9 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-var sockets = make(map[string]*websocket.Conn)
+var clients = make(map[*websocket.Conn]bool) // connected clients
+var broadcast = make(chan *Message)
+var upgrader = websocket.Upgrader{}
 
 // Message received by or sent to server
 type Message struct {
@@ -34,12 +36,12 @@ func index(w http.ResponseWriter, r *http.Request) {
 }
 
 func ws(w http.ResponseWriter, r *http.Request) {
-	u := websocket.Upgrader{}
-	conn, err := u.Upgrade(w, r, nil)
+	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
-	conn.SetReadLimit(2000)
+	defer conn.Close()
+	clients[conn] = true
 
 	conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
 	conn.SetCloseHandler(func(code int, text string) error {
@@ -48,39 +50,59 @@ func ws(w http.ResponseWriter, r *http.Request) {
 			time.Now().Add(1000*time.Millisecond))
 	})
 
-	// receive message
-	msg := &Message{}
-	err = conn.ReadJSON(msg)
-	if err != nil {
-		conn.WriteControl(websocket.CloseMessage,
-			websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "INVALID FORMAT"),
-			time.Now().Add(1000*time.Millisecond))
-		log.Fatal(err)
-	}
-	defer conn.Close()
-
-	fmt.Println(msg.Action)
-	if msg.Action == "HEARTBEAT" {
-		msg.Action = "HEARTBEAT_ACK"
-		err = conn.WriteJSON(msg)
+	for {
+		// receive message
+		msg := &Message{}
+		err = conn.ReadJSON(msg)
 		if err != nil {
-			log.Fatal(err)
-		}
-	} else if msg.Action == "MESSAGE_CREATE" {
-		if len(msg.Data.Content) > 2000 {
 			conn.WriteControl(websocket.CloseMessage,
-				websocket.FormatCloseMessage(websocket.CloseMessageTooBig, "MESSAGE TOO LONG"),
+				websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "INVALID FORMAT"),
 				time.Now().Add(1000*time.Millisecond))
+			delete(clients, conn)
+			log.Fatal(err)
+			break
 		}
 
-		err = conn.WriteJSON(msg)
-		if err != nil {
-			log.Fatal(err)
+		// Add the msg to the broadcast channel
+		broadcast <- msg
+	}
+}
+
+func handleMessages() {
+	for {
+		// Grab the next message from the broadcast channel
+		msg := <-broadcast
+		// Send it out to every client that is currently connected
+		for client := range clients {
+			fmt.Println(msg.Action)
+			if msg.Action == "HEARTBEAT" {
+				msg.Action = "HEARTBEAT_ACK"
+			} else if msg.Action == "MESSAGE_CREATE" {
+				if len(msg.Data.Content) > 2000 {
+					client.WriteControl(websocket.CloseMessage,
+						websocket.FormatCloseMessage(websocket.CloseMessageTooBig, "MESSAGE TOO LONG"),
+						time.Now().Add(1000*time.Millisecond))
+					client.Close()
+					delete(clients, client)
+					break
+				}
+			} else {
+				client.WriteControl(websocket.CloseMessage,
+					websocket.FormatCloseMessage(websocket.CloseInvalidFramePayloadData, "INVALID ACTION"),
+					time.Now().Add(1000*time.Millisecond))
+				client.Close()
+				delete(clients, client)
+				break
+			}
+
+			// Write to the websocket
+			err := client.WriteJSON(msg)
+			if err != nil {
+				client.Close()
+				delete(clients, client)
+				log.Fatal(err)
+			}
 		}
-	} else {
-		conn.WriteControl(websocket.CloseMessage,
-			websocket.FormatCloseMessage(websocket.CloseInvalidFramePayloadData, "INVALID ACTION"),
-			time.Now().Add(1000*time.Millisecond))
 	}
 }
 
@@ -94,6 +116,8 @@ func main() {
 	// Handle Views
 	http.HandleFunc("/", index)
 	http.HandleFunc("/ws", ws)
+	go handleMessages()
 
+	fmt.Println("http server started on :8000")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
