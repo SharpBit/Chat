@@ -60,6 +60,10 @@ func ws(w http.ResponseWriter, r *http.Request) {
 
 func handleMessages(client *websocket.Conn) {
 	for {
+		if _, ok := clients[client]; !ok {
+			// Stop reading if client is closed
+			break
+		}
 		// receive message
 		msg := &Message{}
 		err := client.ReadJSON(msg)
@@ -81,8 +85,13 @@ func replyMessages() {
 		// Grab the next message from the broadcast channel
 		bc := <-broadcast
 		msg := bc.Msg
-		fmt.Println(msg.Action)
 
+		if _, ok := clients[bc.Client]; !ok {
+			// Stop writing if client is closed
+			break
+		}
+
+		fmt.Println(msg.Action)
 		if msg.Action == "HEARTBEAT" {
 			msg.Action = "HEARTBEAT_ACK"
 			// Don't want every client to receive HEARTBEAT_ACK, only the one that sent it
@@ -91,33 +100,28 @@ func replyMessages() {
 				bc.Client.Close()
 				log.Fatal(err)
 			}
-			continue
-		}
-
-		// Send msg out to every client that is currently connected
-		for client := range clients {
-			if msg.Action == "MESSAGE_CREATE" {
-				if len(msg.Data.Content) > 2000 {
-					client.WriteControl(websocket.CloseMessage,
-						websocket.FormatCloseMessage(websocket.CloseMessageTooBig, "MESSAGE TOO LONG"),
-						time.Now().Add(1000*time.Millisecond))
-					client.Close()
-					break
-				}
-			} else {
-				client.WriteControl(websocket.CloseMessage,
-					websocket.FormatCloseMessage(websocket.CloseInvalidFramePayloadData, "INVALID ACTION"),
+		} else if msg.Action == "MESSAGE_CREATE" {
+			if len(msg.Data.Content) > 2000 {
+				bc.Client.WriteControl(websocket.CloseMessage,
+					websocket.FormatCloseMessage(websocket.CloseMessageTooBig, "MESSAGE TOO LONG"),
 					time.Now().Add(1000*time.Millisecond))
-				client.Close()
+				bc.Client.Close()
 				break
 			}
-
-			// Write to the websocket
-			err := client.WriteJSON(msg)
-			if err != nil {
-				client.Close()
-				log.Fatal(err)
+			for client := range clients {
+				// Write to the websocket
+				err := client.WriteJSON(msg)
+				if err != nil {
+					client.Close()
+					log.Fatal(err)
+				}
 			}
+		} else {
+			bc.Client.WriteControl(websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.CloseInvalidFramePayloadData, "INVALID ACTION"),
+				time.Now().Add(1000*time.Millisecond))
+			bc.Client.Close()
+			break
 		}
 	}
 }
