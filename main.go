@@ -99,6 +99,7 @@ func replyMessages() {
 				bc.Client.Close()
 				log.Fatal(err)
 			}
+			bc.Client.SetWriteDeadline(time.Now().Add(30 * time.Second))
 		} else if msg.Action == "MESSAGE_CREATE" {
 			if len(msg.Data.Content) > 2000 {
 				bc.Client.WriteControl(websocket.CloseMessage,
